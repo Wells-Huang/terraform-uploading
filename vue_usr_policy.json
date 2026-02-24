@@ -1,0 +1,38 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3SyncPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::my-vue-app-bucket-20251223"
+            ]
+        },
+        {
+            "Sid": "S3ObjectPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "s3:PutObject",
+                "s3:DeleteObject"
+            ],
+            "Resource": [
+                "arn:aws:s3:::my-vue-app-bucket-20251223/*"
+            ]
+        },
+        {
+            "Sid": "CloudFrontInvalidationPermissions",
+            "Effect": "Allow",
+            "Action": [
+                "cloudfront:CreateInvalidation",
+                "cloudfront:GetInvalidation",
+                "cloudfront:ListInvalidations"
+            ],
+            "Resource": [
+                "arn:aws:cloudfront::076675439156:distribution/d35adrrt9visy0.cloudfront.net"
+            ]
+        }
+    ]
+}
