@@ -121,8 +121,8 @@ async function createTodo(event) {
         return response(400, { error: 'Invalid JSON', message: 'Request body is not valid JSON' });
     }
 
-    const { text } = body;
-    console.log('Parsed text:', text);
+    const { text, imageUrl } = body;
+    console.log('Parsed text:', text, 'imageUrl:', imageUrl);
 
     if (!text || typeof text !== 'string' || text.trim() === '') {
         return response(400, { error: 'Invalid request', message: 'Text is required' });
@@ -133,6 +133,7 @@ async function createTodo(event) {
     const newTodo = {
         id: generateId(),
         text: text.trim(),
+        imageUrl: imageUrl ? imageUrl : undefined,
         completed: false,
         createdAt: new Date().toISOString()
     };

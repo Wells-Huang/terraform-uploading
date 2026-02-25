@@ -40,6 +40,84 @@ resource "aws_api_gateway_resource" "todo_id" {
 }
 
 # ==========================================
+# API 路徑 - /api/upload-url
+# ==========================================
+
+resource "aws_api_gateway_resource" "upload_url" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.api.id
+  path_part   = "upload-url"
+}
+
+# ==========================================
+# Lambda Integration - GET /api/upload-url
+# ==========================================
+
+resource "aws_api_gateway_method" "upload_url_get" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.upload_url.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "upload_url_get" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.upload_url.id
+  http_method             = aws_api_gateway_method.upload_url_get.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.generate_upload_url.invoke_arn
+}
+
+# ==========================================
+# CORS - OPTIONS /api/upload-url
+# ==========================================
+
+resource "aws_api_gateway_method" "upload_url_options" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.upload_url.id
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "upload_url_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.upload_url.id
+  http_method = aws_api_gateway_method.upload_url_options.http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = "{\"statusCode\": 200}"
+  }
+}
+
+resource "aws_api_gateway_method_response" "upload_url_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.upload_url.id
+  http_method = aws_api_gateway_method.upload_url_options.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "upload_url_options" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = aws_api_gateway_resource.upload_url.id
+  http_method = aws_api_gateway_method.upload_url_options.http_method
+  status_code = aws_api_gateway_method_response.upload_url_options.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
+# ==========================================
 # Lambda Integration - GET /api/todos
 # ==========================================
 
@@ -260,6 +338,7 @@ resource "aws_api_gateway_deployment" "main" {
     aws_api_gateway_integration.todos_get,
     aws_api_gateway_integration.todos_post,
     aws_api_gateway_integration.todo_delete,
+    aws_api_gateway_integration.upload_url_get,
     aws_api_gateway_integration.proxy,
     aws_api_gateway_integration.root,
   ]

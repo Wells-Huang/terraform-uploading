@@ -1,0 +1,10 @@
+{
+    "name": "crop-image",
+    "version": "1.0.0",
+    "description": "Crop uploaded S3 image to square",
+    "main": "index.js",
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.0.0",
+        "sharp": "^0.33.2"
+    }
+}

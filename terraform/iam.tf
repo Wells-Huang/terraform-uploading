@@ -44,7 +44,9 @@ resource "aws_iam_role_policy" "lambda_s3_access" {
           "s3:PutObject",
           "s3:DeleteObject"
         ]
-        Resource = "${aws_s3_bucket.todo_data.arn}/*"
+        Resource = [
+          "${aws_s3_bucket.todo_data.arn}/*"
+        ]
       },
       {
         Effect = "Allow"
@@ -55,6 +57,24 @@ resource "aws_iam_role_policy" "lambda_s3_access" {
       }
     ]
   })
+}
+
+# 允許 API Gateway 呼叫 generate_upload_url Lambda
+resource "aws_lambda_permission" "api_gateway_generate_url" {
+  statement_id  = "AllowAPIGatewayInvokeGenerateUrl"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.generate_upload_url.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.main.execution_arn}/*/*"
+}
+
+# 允許 S3 存儲桶呼叫 crop_image Lambda
+resource "aws_lambda_permission" "allow_s3_invoke_crop_image" {
+  statement_id  = "AllowS3InvokeCropImage"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.crop_image.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.todo_data.arn
 }
 
 # ==========================================

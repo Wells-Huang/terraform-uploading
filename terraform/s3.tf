@@ -98,6 +98,37 @@ resource "aws_s3_bucket_cors_configuration" "todo_data" {
 }
 
 # ==========================================
+# S3 Event Notification
+# ==========================================
+
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  bucket = aws_s3_bucket.todo_data.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.crop_image.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "raw/"
+    filter_suffix       = ".jpg"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.crop_image.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "raw/"
+    filter_suffix       = ".jpeg"
+  }
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.crop_image.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "raw/"
+    filter_suffix       = ".png"
+  }
+
+  depends_on = [aws_lambda_permission.allow_s3_invoke_crop_image]
+}
+
+# ==========================================
 # 資料來源
 # ==========================================
 

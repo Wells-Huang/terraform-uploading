@@ -5,18 +5,41 @@
       
       <!-- 新增 TODO 表單 -->
       <div class="add-todo-section">
-        <input
-          v-model="newTodoText"
-          @keyup.enter="addTodo"
-          type="text"
-          class="todo-input"
-          placeholder="輸入新的待辦事項..."
-          :disabled="loading"
-        />
-        <button @click="addTodo" class="add-button" :disabled="loading || !newTodoText.trim()">
-          <span v-if="!adding">➕ 新增</span>
+        <div class="input-group">
+          <input
+            v-model="newTodoText"
+            @keyup.enter="addTodo"
+            type="text"
+            class="todo-input"
+            placeholder="輸入新的待辦事項..."
+            :disabled="loading || uploadingImage"
+          />
+          <div class="image-upload-wrapper">
+            <input 
+              type="file" 
+              id="file-upload" 
+              class="file-input" 
+              accept="image/jpeg, image/png"
+              @change="onFileSelected"
+              :disabled="loading || uploadingImage"
+            />
+            <label for="file-upload" class="file-label" :class="{ 'has-file': selectedFile }">
+              {{ selectedFile ? '🖼️ 已選圖片' : '📷 附圖' }}
+            </label>
+          </div>
+        </div>
+        
+        <button @click="addTodo" class="add-button" :disabled="loading || uploadingImage || (!newTodoText.trim() && !selectedFile)">
+          <span v-if="!adding && !uploadingImage">➕ 新增</span>
+          <span v-else-if="uploadingImage">上傳圖...</span>
           <span v-else>⏳</span>
         </button>
+      </div>
+      
+      <!-- 選取的圖片預覽與取消按鈕 -->
+      <div v-if="selectedFile" class="image-preview-container">
+        <span class="file-name">{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span>
+        <button @click="clearSelectedFile" class="clear-file-btn" :disabled="uploadingImage">❌</button>
       </div>
 
       <!-- 載入狀態 -->
@@ -45,6 +68,9 @@
           >
             <div class="todo-content">
               <span class="todo-text">{{ todo.text }}</span>
+              <div v-if="todo.imageUrl" class="todo-image-container">
+                <img :src="todo.imageUrl" alt="Todo 圖片" class="todo-image" loading="lazy" />
+              </div>
               <span class="todo-date">{{ formatDate(todo.createdAt) }}</span>
             </div>
             <button @click="deleteTodo(todo.id)" class="delete-button" :disabled="deleting === todo.id">
@@ -76,7 +102,9 @@ export default {
       deleting: null,
       error: null,
       apiConnected: false,
-      apiBaseUrl: process.env.VUE_APP_API_BASE_URL || ''
+      apiBaseUrl: process.env.VUE_APP_API_BASE_URL || '',
+      selectedFile: null,
+      uploadingImage: false
     }
   },
   mounted() {
@@ -106,19 +134,102 @@ export default {
       }
     },
 
+    onFileSelected(event) {
+      const file = event.target.files[0]
+      if (!file) return
+      
+      // Basic validation
+      if (!['image/jpeg', 'image/png'].includes(file.type)) {
+        this.error = '請上傳 JPEG 或 PNG 格式的圖片'
+        return
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        this.error = '圖片大小不能超過 5MB'
+        return
+      }
+      
+      this.selectedFile = file
+      this.error = null
+    },
+
+    clearSelectedFile() {
+      this.selectedFile = null
+      const fileInput = document.getElementById('file-upload')
+      if (fileInput) fileInput.value = ''
+    },
+
+    formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes'
+      const k = 1024
+      const sizes = ['Bytes', 'KB', 'MB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    },
+
+    async uploadImage() {
+      if (!this.selectedFile) return null
+      
+      try {
+        this.uploadingImage = true
+        
+        // 1. 取得 Presigned URL
+        const urlParams = new URLSearchParams({ contentType: this.selectedFile.type })
+        const urlResponse = await fetch(`${this.apiBaseUrl}/api/upload-url?${urlParams.toString()}`)
+        
+        if (!urlResponse.ok) throw new Error('無法取得圖片上傳授權')
+        const { uploadUrl, key } = await urlResponse.json()
+        
+        // 2. 將圖片直傳至 S3
+        const uploadResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': this.selectedFile.type
+          },
+          body: this.selectedFile
+        })
+        
+        if (!uploadResponse.ok) throw new Error('圖片上傳失敗')
+        
+        // 3. 回傳將要從 processed 收取的 CDN 圖片路徑
+        // key 是 raw/todo-images/<uuid>.jpg
+        const processedKey = key.replace(/^raw\//, 'processed/')
+        return `${this.apiBaseUrl}/${processedKey}`
+        
+      } catch (err) {
+        console.error('Image upload error:', err)
+        throw err
+      } finally {
+        this.uploadingImage = false
+      }
+    },
+
     async addTodo() {
-      if (!this.newTodoText.trim()) return
+      if (!this.newTodoText.trim() && !this.selectedFile) return
 
       this.adding = true
       this.error = null
 
       try {
+        let imageUrl = null
+        if (this.selectedFile) {
+          try {
+            imageUrl = await this.uploadImage()
+          } catch (uploadErr) {
+            this.error = uploadErr.message
+            this.adding = false
+            return
+          }
+        }
+
         const response = await fetch(`${this.apiBaseUrl}/api/todos`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({ text: this.newTodoText.trim() })
+          body: JSON.stringify({ 
+            text: this.newTodoText.trim() || '附加圖片',
+            imageUrl: imageUrl 
+          })
         })
 
         if (!response.ok) {
@@ -128,6 +239,7 @@ export default {
         const data = await response.json()
         this.todos.push(data.todo)
         this.newTodoText = ''
+        this.clearSelectedFile()
         this.apiConnected = true
       } catch (err) {
         console.error('Failed to add todo:', err)
@@ -385,5 +497,106 @@ export default {
 .todo-list-leave-to {
   opacity: 0;
   transform: translateX(30px);
+}
+
+/* 圖片上傳區域樣式 */
+.input-group {
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+}
+
+.image-upload-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.file-input {
+  display: none;
+}
+
+.file-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+  height: 100%;
+  background: white;
+  border: 2px dashed #d1d5db;
+  border-radius: 12px;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.file-label:hover {
+  border-color: #667eea;
+  color: #667eea;
+  background: #f3f4f6;
+}
+
+.file-label.has-file {
+  border-color: #51cf66;
+  border-style: solid;
+  color: #2b8a3e;
+  background: #ebfbee;
+}
+
+.image-preview-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  margin-top: -1rem;
+  border: 1px solid #e9ecef;
+}
+
+.file-name {
+  font-size: 0.875rem;
+  color: #495057;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clear-file-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: #adb5bd;
+  transition: color 0.2s;
+}
+
+.clear-file-btn:hover:not(:disabled) {
+  color: #fa5252;
+}
+
+.clear-file-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 圖片顯示區 */
+.todo-image-container {
+  margin: 0.5rem 0;
+  border-radius: 8px;
+  overflow: hidden;
+  max-width: 200px;
+  border: 1px solid #e9ecef;
+}
+
+.todo-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: cover;
 }
 </style>
