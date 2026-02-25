@@ -87,10 +87,24 @@ resource "aws_cloudwatch_log_group" "lambda_generate_url" {
 # Lambda 函數 - Crop Image
 # ==========================================
 
+# 確保提供給 Lambda 的 sharp 是 linux-x64 架構編譯的
+resource "null_resource" "build_sharp_layer" {
+  triggers = {
+    package_json = filemd5("${path.module}/../lambda/crop_image/package.json")
+    index_js     = filemd5("${path.module}/../lambda/crop_image/index.js")
+  }
+
+  provisioner "local-exec" {
+    command = "cd ${path.module}/../lambda/crop_image && npm install --os=linux --cpu=x64 sharp"
+  }
+}
+
 data "archive_file" "lambda_crop_image" {
   type        = "zip"
   source_dir  = "${path.module}/../lambda/crop_image"
   output_path = "${path.module}/lambda-crop-image.zip"
+  
+  depends_on = [null_resource.build_sharp_layer]
 }
 
 resource "aws_lambda_function" "crop_image" {
