@@ -69,7 +69,14 @@
             <div class="todo-content">
               <span class="todo-text">{{ todo.text }}</span>
               <div v-if="todo.imageUrl" class="todo-image-container">
-                <img :src="todo.imageUrl" alt="Todo 圖片" class="todo-image" loading="lazy" />
+                <img 
+                  :src="todo.imageUrl" 
+                  alt="Todo 圖片" 
+                  class="todo-image" 
+                  loading="lazy" 
+                  @error="handleImageError($event, todo.id)"
+                  :id="'img-' + todo.id"
+                />
               </div>
               <span class="todo-date">{{ formatDate(todo.createdAt) }}</span>
             </div>
@@ -111,6 +118,47 @@ export default {
     this.fetchTodos()
   },
   methods: {
+    handleImageError(event, todoId) {
+      const img = event.target;
+      
+      // Check if we've retried too many times to prevent infinite loops
+      const maxRetries = 10;
+      const retryCount = parseInt(img.dataset.retryCount || '0', 10);
+      
+      if (retryCount >= maxRetries) {
+        console.warn(`Image for todo ${todoId} still failed after ${maxRetries} retries.`);
+        img.alt = '圖片處理中...請稍後重整';
+        // Add a class that can be styled to show a placeholder
+        img.classList.add('image-processing');
+        return;
+      }
+      
+      // Set to processing state visually (optional, can just leave blank or show a spinner)
+      img.classList.add('image-processing');
+      
+      // Increment retry counter
+      img.dataset.retryCount = (retryCount + 1).toString();
+      
+      // Retry after a delay (e.g., 2 seconds initially, then escalating)
+      const delay = Math.min(2000 * Math.pow(1.5, retryCount), 10000);
+      
+      console.log(`Image not ready yet. Retrying in ${delay}ms... (Attempt ${retryCount + 1})`);
+      
+      setTimeout(() => {
+        // Appending a timestamp query parameter bypasses browser cache for the retry
+        const separator = img.src.includes('?') ? '&' : '?';
+        // Clean out previous retry timestamps to avoid query string explosion
+        const cleanSrc = img.src.split(separator + 'retry=')[0].split('?retry=')[0];
+        
+        img.src = `${cleanSrc}${cleanSrc.includes('?') ? '&' : '?'}retry=${Date.now()}`;
+        
+        // When it finally loads successfully, we can remove the processing class
+        img.onload = () => {
+           img.classList.remove('image-processing');
+        };
+      }, delay);
+    },
+
     async fetchTodos() {
       this.loading = true
       this.error = null
@@ -598,5 +646,11 @@ export default {
   width: 100%;
   height: auto;
   object-fit: cover;
+  transition: opacity 0.3s;
+}
+
+.todo-image.image-processing {
+  opacity: 0.5;
+  filter: grayscale(100%) blur(2px);
 }
 </style>

@@ -84,6 +84,28 @@ resource "aws_s3_bucket_public_access_block" "todo_data" {
   restrict_public_buckets = true
 }
 
+# Bucket Policy - 允許 CloudFront OAI 讀取
+resource "aws_s3_bucket_policy" "todo_data" {
+  bucket = aws_s3_bucket.todo_data.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudFrontOAI"
+        Effect    = "Allow"
+        Principal = {
+          AWS = aws_cloudfront_origin_access_identity.todo_data_oai.iam_arn
+        }
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.todo_data.arn}/*"
+      }
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.todo_data]
+}
+
 # CORS 配置
 resource "aws_s3_bucket_cors_configuration" "todo_data" {
   bucket = aws_s3_bucket.todo_data.id
