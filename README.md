@@ -6,9 +6,11 @@
 
 本專案使用 **AWS API Gateway** 作為核心負載平衡器，根據請求路徑將流量分流至不同後端：
 
-- **API 流量 (`/api/*`)**: 路由至 **AWS Lambda** 處理業務邏輯 (CRUD)，資料儲存於 **S3**。
-- **靜態資源 (`/*`)**: 路由至 **S3** 靜態網站託管，提供 Vue.js 前端檔案。
-- **全球加速**: 最前端使用 **CloudFront** CDN 進行快取與傳輸加速，並實施地區限制 (Geo Restriction)。
+- **API 流量 (`/api/*`)**: 路由至 **AWS Lambda** 處理業務邏輯 (CRUD) 與核發 S3 首傳授權 (Presigned URL)。
+- **靜態資源 (`/*`)**: 路由至 **S3 Website Bucket** 提供 Vue.js 前端檔案。
+- **圖片資源 (`/processed/*`)**: 路由至 **S3 Data Bucket** (透過 OAI 安全讀取) 提供裁切後的圖片。
+- **背景處理**: S3 `raw/` 區收到圖片時，自動觸發 Lambda (`sharp` 套件) 進行正方形裁切並存入 `processed/` 區。
+- **全球加速**: 最前端使用 **CloudFront** CDN 進行快取與傳輸加速，並實施地區限制。
 
 ```mermaid
 graph TD
@@ -16,16 +18,22 @@ graph TD
     CF --> APIGW[API Gateway]
     
     subgraph "AWS ap-northeast-1"
-        APIGW -- "/api/*" --> Lambda[Lambda Function]
+        APIGW -- "/api/*" --> LambdaAPI[API Lambdas - CRUD & URL]
         APIGW -- "/*" --> S3Web[S3 Static Website]
+        CF -- "/processed/* (OAI)" --> S3Data[S3 Data Bucket]
         
-        Lambda --> S3Data[S3 Data Bucket]
+        LambdaAPI -- Write Metadata --> S3Data
+        User -- "PUT (Presigned URL)" --> S3Data["S3 Data Bucket (raw/)"]
+        S3Data -- "S3 Event Trigger" --> LambdaCrop["Lambda (Crop Image)"]
+        LambdaCrop -- Write Image --> S3Data["S3 Data Bucket (processed/)"]
     end
     
     style APIGW fill:#ff9900,stroke:#232f3e,stroke-width:2px
-    style Lambda fill:#ff9900,stroke:#232f3e,stroke-width:2px
+    style LambdaAPI fill:#ff9900,stroke:#232f3e,stroke-width:2px
+    style LambdaCrop fill:#ff9900,stroke:#232f3e,stroke-width:2px
     style S3Web fill:#3F8624,stroke:#232f3e,stroke-width:2px
     style S3Data fill:#3F8624,stroke:#232f3e,stroke-width:2px
+```
 ```
 
 ## 🚀 快速部署
@@ -45,21 +53,27 @@ terraform apply
 ```
 *確認輸入 `yes` 執行部署。部署完成後將顯示 CloudFront Domain 等資訊。*
 
-### 2. 編譯與上傳前端
-系統會自動生成 `.env.production`，只需編譯並上傳：
+### 透過 GitHub Actions 自動部署
+本專案已包含完整的 CI/CD 流程 (`.github/workflows/deploy.yml`)，只要推送到 `main` 分支即可自動打包並上傳 S3。
 
-```bash
-# 回到專案根目錄
-cd ..
-npm install
-npm run build
+**必須至專案設定的 `Settings > Secrets and variables > Actions` 新增以下機密資訊 (Secrets)：**
+1. `VUE_APP_API_BASE_URL`: API Gateway 或 CloudFront 的網址 (例如：`https://d3ir7v35iscc10.cloudfront.net`)
+2. `AWS_ACCESS_KEY_ID`: Terraform 輸出的 `github_actions_access_key_id`
+3. `AWS_SECRET_ACCESS_KEY`: IAM User 的 Secret Access Key (需手動使用 `terraform output -raw` 解鎖查看)
+4. `AWS_S3_BUCKET`: Terraform 輸出的 `website_bucket_name`
+5. `AWS_CLOUDFRONT_DISTRIBUTION_ID`: Terraform 輸出的 `cloudfront_distribution_id`
 
-# 上傳到 S3 (將 <bucket-name> 替換為 terraform output 的 website_bucket_name)
-aws s3 sync dist/ s3://<bucket-name> --delete --region ap-northeast-1
+## 📸 圖片處理核心流程
+此專案實現了無伺服器的圖片非同步裁切，避免大型圖檔上傳佔用後端資源與時間：
+1. 前端向 `/api/upload-url` 申請具時效性的 **S3 Presigned URL**。
+2. 前端透過該 URL 將圖片以 PUT 方法**直傳**進 S3 `raw/` 目錄。
+3. `raw/` 區接收圖片後，觸發 S3 Event Notification 呼叫 `crop_image` Lambda。
+4. Lambda 使用 `sharp` 將短邊作為基準對齊中心進行正方形裁切。
+5. 完成品寫入 `processed/` 目錄。
+6. 前端利用自動重試載入機制 (`@error` listener)，平滑等待並顯示 CloudFront 上的最終裁切成品。
 
-# 刷新 CloudFront 快取 (將 <dist-id> 替換為 cloudfront_distribution_id)
-aws cloudfront create-invalidation --distribution-id <dist-id> --paths "/*"
-```
+> **⚠️ Lambda 與 `sharp` 的相容性警告**：
+> 由於支援跨平台的影像處理引擎 `sharp` 依賴原生 C++ 函式庫，我們已在 `terraform/lambda.tf` 中加入了 `null_resource`，在打包壓縮前會透過 `npm install --os=linux --cpu=x64 sharp` 確保打包到雲端的環境與 AWS Lambda (Linux) 相容。不可在 Windows/Mac 上打包 `node_modules` 後直接上傳，否則會在執行時發生模組無法加載的致命錯誤。
 
 ## ✅ 驗證測試
 
